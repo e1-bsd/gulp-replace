@@ -3,30 +3,33 @@
 var Transform = require('readable-stream/transform');
 var rs = require('replacestream');
 var istextorbinary = require('istextorbinary');
+var lodash = require('lodash');
 
 module.exports = function(search, replacement, options) {
   return new Transform({
     objectMode: true,
     transform: function(file, enc, callback) {
+      var replacementWrap = wrapReplacement(replacement, file);
+
       if (file.isNull()) {
         return callback(null, file);
       }
 
       function doReplace() {
         if (file.isStream()) {
-          file.contents = file.contents.pipe(rs(search, replacement));
+          file.contents = file.contents.pipe(rs(search, replacementWrap));
           return callback(null, file);
         }
 
         if (file.isBuffer()) {
           if (search instanceof RegExp) {
-            file.contents = new Buffer(String(file.contents).replace(search, replacement));
+            file.contents = new Buffer(String(file.contents).replace(search, replacementWrap));
           }
           else {
             var chunks = String(file.contents).split(search);
 
             var result;
-            if (typeof replacement === 'function') {
+            if (typeof replacementWrap === 'function') {
               // Start with the first chunk already in the result
               // Replacements will be added thereafter
               // This is done to avoid checking the value of i in the loop
@@ -35,7 +38,7 @@ module.exports = function(search, replacement, options) {
               // The replacement function should be called once for each match
               for (var i = 1; i < chunks.length; i++) {
                 // Add the replacement value
-                result.push(replacement(search));
+                result.push(replacementWrap(search));
 
                 // Add the next chunk
                 result.push(chunks[i]);
@@ -44,7 +47,7 @@ module.exports = function(search, replacement, options) {
               result = result.join('');
             }
             else {
-              result = chunks.join(replacement);
+              result = chunks.join(replacementWrap);
             }
 
             file.contents = new Buffer(result);
@@ -75,3 +78,18 @@ module.exports = function(search, replacement, options) {
     }
   });
 };
+
+function wrapReplacement(replacement, file) {
+  if (typeof replacement !== 'function') {
+    return replacement;
+  }
+
+  return function replacementWrap() {
+    var argsArray = lodash.values(arguments);
+    var args = [file];
+    argsArray.forEach((value) => {
+      args.push(value);
+    });
+    return replacement.apply(this, args);
+  };
+}
